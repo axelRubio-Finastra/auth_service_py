@@ -1,11 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-from . import models, schemas, auth, email_utils
-from .database import Base, engine, SessionLocal
+from app import models, schemas, auth, email_utils
+from app.database import Base, engine, SessionLocal
+import logging
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Auth Service", description="A simple authentication service with email verification")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_db():
     db = SessionLocal()
@@ -30,7 +34,11 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     
-    email_utils.send_verification_email(user.email, token)
+    try:
+        email_utils.send_verification_email(user.email, token)
+    except Exception as e:
+        logger.error(f"Failed to send verification email to {user.email}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
     return {"message": "User created successfully. Check your email to verify your account."}
 
 @app.get("/verify-email")
@@ -69,18 +77,28 @@ def admin_route(token: str = Header(...)):
         raise HTTPException(status_code=403, detail="Not authorized")
     return {"message": "Welcome to the admin route!"}
 
+class EmailRequest(BaseModel):
+    email: EmailStr
 
 @app.post("/resend-verification-email")
-def resend_verification(email: EmailStr, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter_by(email=email).first()
+def resend_verification(request: EmailRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter_by(email=request.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_verified:
         return {"msg": "Account already verified"}
 
     token = auth.create_email_verification_token(user.email)
-    email_utils.send_verification_email(user.email, token)
+    try:
+        email_utils.send_verification_email(user.email, token)
+    except Exception as e:
+        logger.error(f"Failed to send verification email to {user.email}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
 
     user.verification_token = token
     db.commit()
     return {"msg": "Verification email resent"}
+
+@app.get("/")
+def root():
+    return {"message": "Auth Service is running"}

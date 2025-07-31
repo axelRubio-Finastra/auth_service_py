@@ -9,3 +9,5 @@ python-dotenv
 aiosmtplib
 jinja2
 psycopg2-binary
+pytest 
+httpx
