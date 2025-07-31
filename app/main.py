@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from . import models, schemas, auth, email_utils
 from .database import Base, engine, SessionLocal
@@ -19,13 +20,16 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     hashed_password = auth.hash_password(user.password)
+    
+    token = auth.create_email_verification_token(user.email)
+
     new_user = models.User(email=user.email, hashed_password=hashed_password, 
-                           name=user.name, last_name=user.last_name)
+                           name=user.name, last_name=user.last_name, verification_token=token)
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     
-    token = auth.create_email_verification_token(user.email)
     email_utils.send_verification_email(user.email, token)
     return {"message": "User created successfully. Check your email to verify your account."}
 
@@ -66,3 +70,17 @@ def admin_route(token: str = Header(...)):
     return {"message": "Welcome to the admin route!"}
 
 
+@app.post("/resend-verification-email")
+def resend_verification(email: EmailStr, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter_by(email=email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_verified:
+        return {"msg": "Account already verified"}
+
+    token = auth.create_email_verification_token(user.email)
+    email_utils.send_verification_email(user.email, token)
+
+    user.verification_token = token
+    db.commit()
+    return {"msg": "Verification email resent"}

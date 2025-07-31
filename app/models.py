@@ -11,4 +11,5 @@ class User(Base):
     name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     role = Column(String, default='user')
+    verification_token = Column(String, nullable=True)
 
